@@ -237,3 +237,10 @@ def test_enum_int():
     assert is_valid(schema, instance) == True
     instance["foo"] = StrEnum.bar
     assert is_valid(schema, instance) == False
+
+
+def test_option_documents():
+    schema = {"$ref": "http://example.json/schema.json#/rule"}
+    documents = {"http://example.json/schema.json": {"rule": {"minLength": 5}}}
+    assert not is_valid(schema, "foo", documents=documents)
+    assert is_valid(schema, "foo42", documents=documents)

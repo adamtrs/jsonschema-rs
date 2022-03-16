@@ -20,7 +20,7 @@ use jsonschema::{paths::JSONPointer, Draft};
 use pyo3::{
     exceptions::{self, PyValueError},
     prelude::*,
-    types::{PyAny, PyList, PyType},
+    types::{PyAny, PyDict, PyList, PyString, PyType},
     wrap_pyfunction, AsPyPointer, PyIterProtocol, PyObjectProtocol,
 };
 
@@ -130,6 +130,7 @@ fn get_draft(draft: u8) -> PyResult<Draft> {
 fn make_options(
     draft: Option<u8>,
     with_meta_schemas: Option<bool>,
+    documents: Option<&PyDict>,
 ) -> PyResult<jsonschema::CompilationOptions> {
     let mut options = jsonschema::JSONSchema::options();
     if let Some(raw_draft_version) = draft {
@@ -137,6 +138,13 @@ fn make_options(
     }
     if with_meta_schemas == Some(true) {
         options.with_meta_schemas();
+    }
+    if let Some(documents) = documents {
+        for (id, document) in documents.iter() {
+            let id: String = id.downcast::<PyString>()?.to_str()?.into();
+            let document = ser::to_value(document)?;
+            options.with_document(id, document);
+        }
     }
     Ok(options)
 }
@@ -226,7 +234,7 @@ fn to_error_message(error: &jsonschema::ValidationError<'_>) -> String {
     message
 }
 
-/// is_valid(schema, instance, draft=None, with_meta_schemas=False)
+/// is_valid(schema, instance, draft=None, with_meta_schemas=False, *, documents={})
 ///
 /// A shortcut for validating the input instance against the schema.
 ///
@@ -235,16 +243,17 @@ fn to_error_message(error: &jsonschema::ValidationError<'_>) -> String {
 ///
 /// If your workflow implies validating against the same schema, consider using `JSONSchema.is_valid`
 /// instead.
-#[pyfunction]
-#[pyo3(text_signature = "(schema, instance, draft=None, with_meta_schemas=False)")]
+#[pyfunction(schema, instance, draft, with_meta_schemas, "*", documents)]
+#[pyo3(text_signature = "(schema, instance, draft=None, with_meta_schemas=False, *, documents={})")]
 fn is_valid(
     py: Python<'_>,
     schema: &PyAny,
     instance: &PyAny,
     draft: Option<u8>,
     with_meta_schemas: Option<bool>,
+    documents: Option<&PyDict>,
 ) -> PyResult<bool> {
-    let options = make_options(draft, with_meta_schemas)?;
+    let options = make_options(draft, with_meta_schemas, documents)?;
     let schema = ser::to_value(schema)?;
     match options.compile(&schema) {
         Ok(compiled) => {
@@ -255,7 +264,7 @@ fn is_valid(
     }
 }
 
-/// validate(schema, instance, draft=None, with_meta_schemas=False)
+/// validate(schema, instance, draft=None, with_meta_schemas=False, *, documents={})
 ///
 /// Validate the input instance and raise `ValidationError` in the error case
 ///
@@ -266,16 +275,17 @@ fn is_valid(
 /// If the input instance is invalid, only the first occurred error is raised.
 /// If your workflow implies validating against the same schema, consider using `JSONSchema.validate`
 /// instead.
-#[pyfunction]
-#[pyo3(text_signature = "(schema, instance, draft=None, with_meta_schemas=False)")]
+#[pyfunction(schema, instance, draft, with_meta_schemas, "*", documents)]
+#[pyo3(text_signature = "(schema, instance, draft=None, with_meta_schemas=False, *, documents={})")]
 fn validate(
     py: Python<'_>,
     schema: &PyAny,
     instance: &PyAny,
     draft: Option<u8>,
     with_meta_schemas: Option<bool>,
+    documents: Option<&PyDict>,
 ) -> PyResult<()> {
-    let options = make_options(draft, with_meta_schemas)?;
+    let options = make_options(draft, with_meta_schemas, documents)?;
     let schema = ser::to_value(schema)?;
     match options.compile(&schema) {
         Ok(compiled) => raise_on_error(py, &compiled, instance),
@@ -283,7 +293,7 @@ fn validate(
     }
 }
 
-/// iter_errors(schema, instance, draft=None, with_meta_schemas=False)
+/// iter_errors(schema, instance, draft=None, with_meta_schemas=False, *, documents={})
 ///
 /// Iterate the validation errors of the input instance
 ///
@@ -293,16 +303,17 @@ fn validate(
 ///
 /// If your workflow implies validating against the same schema, consider using `JSONSchema.iter_errors`
 /// instead.
-#[pyfunction]
-#[pyo3(text_signature = "(schema, instance, draft=None, with_meta_schemas=False)")]
+#[pyfunction(schema, instance, draft, with_meta_schemas, "*", documents)]
+#[pyo3(text_signature = "(schema, instance, draft=None, with_meta_schemas=False, *, documents={})")]
 fn iter_errors(
     py: Python<'_>,
     schema: &PyAny,
     instance: &PyAny,
     draft: Option<u8>,
     with_meta_schemas: Option<bool>,
+    documents: Option<&PyDict>,
 ) -> PyResult<ValidationErrorIter> {
-    let options = make_options(draft, with_meta_schemas)?;
+    let options = make_options(draft, with_meta_schemas, documents)?;
     let schema = ser::to_value(schema)?;
     match options.compile(&schema) {
         Ok(compiled) => iter_on_error(py, &compiled, instance),
@@ -310,7 +321,7 @@ fn iter_errors(
     }
 }
 
-/// JSONSchema(schema, draft=None, with_meta_schemas=False)
+/// JSONSchema(schema, draft=None, with_meta_schemas=False, *, documents={})
 ///
 /// JSON Schema compiled into a validation tree.
 ///
@@ -320,7 +331,7 @@ fn iter_errors(
 ///
 /// By default Draft 7 will be used for compilation.
 #[pyclass(module = "jsonschema_rs")]
-#[pyo3(text_signature = "(schema, draft=None, with_meta_schemas=False)")]
+#[pyo3(text_signature = "(schema, draft=None, with_meta_schemas=False, *, documents={})")]
 struct JSONSchema {
     schema: jsonschema::JSONSchema,
     repr: String,
@@ -339,13 +350,15 @@ fn get_schema_repr(schema: &serde_json::Value) -> String {
 #[pymethods]
 impl JSONSchema {
     #[new]
+    #[args(schema, draft, with_meta_schemas, "*", documents)]
     fn new(
         py: Python<'_>,
         schema: &PyAny,
         draft: Option<u8>,
         with_meta_schemas: Option<bool>,
+        documents: Option<&PyDict>,
     ) -> PyResult<Self> {
-        let options = make_options(draft, with_meta_schemas)?;
+        let options = make_options(draft, with_meta_schemas, documents)?;
         let raw_schema = ser::to_value(schema)?;
         match options.compile(&raw_schema) {
             Ok(schema) => Ok(JSONSchema {
@@ -386,7 +399,7 @@ impl JSONSchema {
             let slice = unsafe { std::slice::from_raw_parts(uni, str_size as usize) };
             let raw_schema = serde_json::from_slice(slice)
                 .map_err(|error| PyValueError::new_err(format!("Invalid string: {}", error)))?;
-            let options = make_options(draft, with_meta_schemas)?;
+            let options = make_options(draft, with_meta_schemas, None)?;
             match options.compile(&raw_schema) {
                 Ok(schema) => Ok(JSONSchema {
                     schema,
