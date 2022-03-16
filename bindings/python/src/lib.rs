@@ -341,12 +341,12 @@ impl JSONSchema {
     #[new]
     fn new(
         py: Python<'_>,
-        pyschema: &PyAny,
+        schema: &PyAny,
         draft: Option<u8>,
         with_meta_schemas: Option<bool>,
     ) -> PyResult<Self> {
         let options = make_options(draft, with_meta_schemas)?;
-        let raw_schema = ser::to_value(pyschema)?;
+        let raw_schema = ser::to_value(schema)?;
         match options.compile(&raw_schema) {
             Ok(schema) => Ok(JSONSchema {
                 schema,
@@ -355,7 +355,7 @@ impl JSONSchema {
             Err(error) => Err(into_py_err(py, error)?),
         }
     }
-    /// from_str(string, draft=None, with_meta_schemas=False)
+    /// from_str(schema_str, draft=None, with_meta_schemas=False)
     ///
     /// Create `JSONSchema` from a serialized JSON string.
     ///
@@ -363,15 +363,15 @@ impl JSONSchema {
     ///
     /// Use it if you have your schema as a string and want to utilize Rust JSON parsing.
     #[classmethod]
-    #[pyo3(text_signature = "(string, draft=None, with_meta_schemas=False)")]
+    #[pyo3(text_signature = "(schema_str, draft=None, with_meta_schemas=False)")]
     fn from_str(
         _: &PyType,
         py: Python<'_>,
-        pyschema: &PyAny,
+        schema_str: &PyAny,
         draft: Option<u8>,
         with_meta_schemas: Option<bool>,
     ) -> PyResult<Self> {
-        let obj_ptr = pyschema.as_ptr();
+        let obj_ptr = schema_str.as_ptr();
         let object_type = unsafe { pyo3::ffi::Py_TYPE(obj_ptr) };
         if unsafe { object_type != types::STR_TYPE } {
             let type_name =
